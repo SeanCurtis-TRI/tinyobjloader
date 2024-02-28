@@ -67,6 +67,14 @@ THE SOFTWARE.
 #include <map>
 #include <string>
 #include <vector>
+#include <math.h>
+#include <stdlib.h>
+
+#if defined(__APPLE__)
+#include <xlocale.h>
+#else
+#include <locale.h>
+#endif
 
 namespace tinyobj {
 
@@ -899,6 +907,24 @@ static bool tryParseDouble(const char *s, const char *s_end, double *result) {
     return false;
   }
 
+  // This is the beginning of Drake's re-implementation.
+#if defined(__APPLE__)
+  static locale_t c_locale = newlocale(LC_ALL_MASK, NULL, NULL);
+#else
+  static locale_t c_locale = newlocale(LC_ALL_MASK, "C", (locale_t)0);
+#endif
+
+  char *str_end = NULL;
+  const double val = strtod_l(s, &str_end, c_locale);
+  if (str_end != s && isfinite(val)) {
+    *result = val;
+    return true;
+  } else {
+    return false;
+  }
+
+  // What follows is the disabled upstream implementation.
+#if 0
   double mantissa = 0.0;
   // This exponent is base 2 rather than 10.
   // However the exponent we parse is supposed to be one of ten,
@@ -1025,6 +1051,7 @@ assemble:
   return true;
 fail:
   return false;
+#endif  // #if 0
 }
 
 static inline real_t parseReal(const char **token, double default_value = 0.0) {
@@ -2323,12 +2350,13 @@ void LoadMtl(std::map<std::string, int> *material_map,
       ParseTextureNameAndOption(&(material.diffuse_texname),
                                 &(material.diffuse_texopt), token);
 
-      // Set a decent diffuse default value if a diffuse texture is specified
-      // without a matching Kd value.
+      // If only a diffuse map has been set, we want the final color to be
+      // fully defined by that specification. So, set the diffuse color to
+      // white.
       if (!has_kd) {
-        material.diffuse[0] = static_cast<real_t>(0.6);
-        material.diffuse[1] = static_cast<real_t>(0.6);
-        material.diffuse[2] = static_cast<real_t>(0.6);
+        material.diffuse[0] = static_cast<real_t>(1);
+        material.diffuse[1] = static_cast<real_t>(1);
+        material.diffuse[2] = static_cast<real_t>(1);
       }
 
       continue;
@@ -3474,11 +3502,26 @@ bool ObjReader::ParseFromFile(const std::string &filename,
   return valid_;
 }
 
+namespace {
+// This provides a string buffer for std::istream that doesn't copy the input
+// string. Instead, it aliases the string's character array. This is only
+// safe as long as the parsing never calls std::istream::putback() with a
+// *different* character than read -- as that would mutate the string.
+struct AliasingStringReadBuf : public std::streambuf {
+ public:
+  AliasingStringReadBuf(const std::string& str) {
+    char* s = const_cast<char*>(str.c_str());
+    setg(s, s, s + str.size());
+  }
+};
+
+}
+
 bool ObjReader::ParseFromString(const std::string &obj_text,
                                 const std::string &mtl_text,
                                 const ObjReaderConfig &config) {
-  std::stringbuf obj_buf(obj_text);
-  std::stringbuf mtl_buf(mtl_text);
+  AliasingStringReadBuf obj_buf(obj_text);
+  AliasingStringReadBuf mtl_buf(mtl_text);
 
   std::istream obj_ifs(&obj_buf);
   std::istream mtl_ifs(&mtl_buf);
