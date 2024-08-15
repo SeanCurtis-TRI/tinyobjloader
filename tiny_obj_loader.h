@@ -64,6 +64,7 @@ THE SOFTWARE.
 #ifndef TINY_OBJ_LOADER_H_
 #define TINY_OBJ_LOADER_H_
 
+#include <iostream>
 #include <map>
 #include <string>
 #include <vector>
@@ -565,6 +566,20 @@ class ObjReader {
   /// @param[in] config Reader configuration
   ///
   bool ParseFromString(const std::string &obj_text, const std::string &mtl_text,
+                       const ObjReaderConfig &config = ObjReaderConfig());
+
+  ///
+  /// Parse .obj from a text string.
+  /// Requests for materials (via access to material library files) will be
+  /// processed by mtl_reader, if provided. Otherwise, there will be no
+  /// materials parsed.
+  ///
+  /// @param[in] obj_text wavefront .obj contents
+  /// @param[in] mtl_reader material reader to service material library requests
+  /// @param[in] config Reader configuration
+  ///
+  bool ParseFromString(const std::string &obj_text,
+                       MaterialReader *mtl_reader,
                        const ObjReaderConfig &config = ObjReaderConfig());
 
   ///
@@ -2516,6 +2531,7 @@ bool MaterialFileReader::operator()(const std::string &matId,
 
     for (size_t i = 0; i < paths.size(); i++) {
       std::string filepath = JoinPath(paths[i], matId);
+      std::cout << "Reading file path: " << filepath << "\n";
 
       std::ifstream matIStream(filepath.c_str());
       if (matIStream) {
@@ -2523,6 +2539,7 @@ bool MaterialFileReader::operator()(const std::string &matId,
 
         return true;
       }
+      std::cout << "   Error reading from stream\n";
     }
 
     std::stringstream ss;
@@ -2907,6 +2924,7 @@ bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
     // load mtl
     if ((0 == strncmp(token, "mtllib", 6)) && IS_SPACE((token[6]))) {
       if (readMatFn) {
+        std::cout << "mtllib token: " << token << "\n";
         token += 7;
 
         std::vector<std::string> filenames;
@@ -2924,7 +2942,9 @@ bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
         } else {
           bool found = false;
           for (size_t s = 0; s < filenames.size(); s++) {
+            std::cout << "Mtllib filename: " << filenames[s] << "\n";
             if (material_filenames.count(filenames[s]) > 0) {
+              std::cout << "  already read\n";
               found = true;
               continue;
             }
@@ -2944,6 +2964,7 @@ bool LoadObj(attrib_t *attrib, std::vector<shape_t> *shapes,
             if (ok) {
               found = true;
               material_filenames.insert(filenames[s]);
+              std::cout << "Ignoring the rest\n";
               break;
             }
           }
@@ -3530,6 +3551,20 @@ bool ObjReader::ParseFromString(const std::string &obj_text,
 
   valid_ = LoadObj(&attrib_, &shapes_, &materials_, &warning_, &error_,
                    &obj_ifs, &mtl_ss, config.triangulate, config.vertex_color);
+
+  return valid_;
+}
+
+bool ObjReader::ParseFromString(const std::string &obj_text,
+                                MaterialReader* mtl_reader,
+                                const ObjReaderConfig &config) {
+  AliasingStringReadBuf obj_buf(obj_text);
+
+  std::istream obj_ifs(&obj_buf);
+
+  valid_ = LoadObj(&attrib_, &shapes_, &materials_, &warning_, &error_,
+                   &obj_ifs, mtl_reader, config.triangulate,
+                   config.vertex_color);
 
   return valid_;
 }
